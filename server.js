@@ -5,6 +5,6 @@ const Server = http.createServer(app) ; // here create server using app module
 const PORT = process.env.PORT ||9000;
 
 //running on port
-app.listen(PORT,()=>{
+Server.listen(PORT,()=>{
     console.log(`listening on: http://localhost:${PORT}`);
 })
