@@ -1,6 +1,6 @@
 const { Goal, GoalUser, GoalUserTargets } = require('../models/goal');
 const { default: mongoose } = require('mongoose');
-const User = require("../models/User");
+const User = require("../models/user");
 
 
 // Create a new goal
