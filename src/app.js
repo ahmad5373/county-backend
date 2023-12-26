@@ -22,8 +22,8 @@ app.get('/' , (req,res)=>{
     res.send("Application is currently working !")
 });
 
-// using express middleware in this main file to call api
-app.use("/users", User);
-app.use("/goals", Goals);
+// // using express middleware in this main file to call api
+// app.use("/users", User);
+// app.use("/goals", Goals);
 
 module.exports = app;
