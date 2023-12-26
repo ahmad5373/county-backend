@@ -5,8 +5,8 @@ const dotenv = require("dotenv");
 const connectionDB = require("../config/database");
 const bodyParser  = require("body-parser");
 const cookieParser = require("cookie-parser");
-// const User = require("../src/routes/userRoutes");
-const Goals = require("../src/routes/goalRoutes");
+const User = require("../src/routes/userRoutes");
+// const Goals = require("../src/routes/goalRoutes");
 
 dotenv.config();
 
@@ -23,7 +23,7 @@ app.get('/' , (req,res)=>{
 });
 
 // using express middleware in this main file to call api
-// app.use("/users", User);
-app.use("/goals", Goals);
+app.use("/users", User);
+// app.use("/goals", Goals);
 
 module.exports = app;
