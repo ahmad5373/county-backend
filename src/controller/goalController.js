@@ -405,44 +405,122 @@ exports.getUserEndedGoals = async (req, res) => {
     }
 };
 
-
-// Get Active Goals
+// Get Active  Goals
 exports.getActiveGoals = async (req, res) => {
     try {
-        const adminRole = req.user.user.role
+        const adminRole = req.user.user.role;
         // Only Super Admins, Admins, and the user themselves can view goal details
         if (adminRole !== 1 && adminRole !== 2) {
-            return res.status(403).json({ error: "Forbidden: You don't have permission to view this goal" });
+            return res.status(403).json({ error: "Forbidden: You don't have permission to view goals" });
         }
-
-        // Find goals where the current date is within the start and end date range
+        // Find active goals where the current date is within the start and end date range
         const activeGoals = await Goal.findOne({
             startDate: { $lte: new Date() },
             endDate: { $gte: new Date() },
             status: true, // Assuming status is also true for active goals
         }).populate('goalUsers');
 
-        if (!activeGoals) {
-            return res.status(404).json({ error: "No Active Goal Found" })
-        }
-         // Map the active goals to the desired response structure
-         const activeGoalsData = {
+        if (!activeGoals) { return res.status(404).json({ error: "No Active Goals Found." }) }
+        // Assuming you have the goalId and userId variables available
+        const goalId = activeGoals ? activeGoals._id : null;  // Replace with the actual goalId
+        const userIds = activeGoals ? activeGoals.goalUsers.map(goalUser => goalUser.userId) : [];
+
+        // Find the last updated information for each user
+        const lastUpdatedInfo = await GoalUserTargets.aggregate([
+            {
+                $match: {
+                    goalId,
+                    userId: { $in: userIds }
+                }
+            },
+            {
+                $sort: { recruited_at: -1 }
+            },
+            {
+                $group: {
+                    _id: "$userId",
+                    latestUpdate: { $first: "$$ROOT" }
+                }
+            }
+        ]);
+        const activeGoalsData = {
             _id: activeGoals._id,
             startDate: activeGoals.startDate,
             endDate: activeGoals.endDate,
             reward: activeGoals.reward,
             bonus: activeGoals.bonus,
             repeat: activeGoals.repeat,
-            users: activeGoals.goalUsers.map(goalUser => ({
-                userId: goalUser.userId,
-                goalId: goalUser.goalId,
-                goalNumber: goalUser.goalNumber
-            }))
+            createdAt: activeGoals.createdAt,
+            updatedAt: activeGoals.updatedAt,
+            users: await Promise.all(activeGoals.goalUsers.map(async goalUser => {
+                // console.log("goals users", goalUser);
+                const user = await User.findById(goalUser.userId);
+                const userLastUpdatedInfo = lastUpdatedInfo.find(
+                    (info) => info._id.toString() === goalUser.userId.toString()
+                );
+                const lastUpdated = userLastUpdatedInfo ? userLastUpdatedInfo.latestUpdate.updatedAt : null;
+                return {
+                    _id: goalUser._id,
+                    userId: goalUser.userId,
+                    firstName: user.firstName,
+                    lastName: user.lastName,
+                    goalNumber: goalUser.goalNumber,
+                    createdAt: goalUser.createdAt,
+                    updatedAt: goalUser.updatedAt,
+                    lastUpdated
+                };
+            })),
         }
         res.status(200).json(activeGoalsData);
     } catch (error) {
-        console.log("err", error);
-        console.error(error);
+        console.log("Error:", error);
+        res.status(500).json({ error: error.message });
+    }
+};
+
+// Get Upcoming Goals
+exports.getUpcomingGoals = async (req, res) => {
+    try {
+        const adminRole = req.user.user.role;
+        // Only Super Admins, Admins, and the user themselves can view goal details
+        if (adminRole !== 1 && adminRole !== 2) {
+            return res.status(403).json({ error: "Forbidden: You don't have permission to view goals" });
+        }
+
+        // Find upcoming goals where the start date is after the current date
+        const upcomingGoals = await Goal.findOne({
+            startDate: { $gt: new Date() },
+            status: true,
+        }).populate('goalUsers');
+
+        if (!upcomingGoals) { return res.status(404).json({ error: "No Upcoming Goals Found." }) }
+
+        // Map the upcoming goals to the desired response structure
+        const upcomingGoalsData = {
+            _id: upcomingGoals._id,
+            startDate: upcomingGoals.startDate,
+            endDate: upcomingGoals.endDate,
+            reward: upcomingGoals.reward,
+            bonus: upcomingGoals.bonus,
+            repeat: upcomingGoals.repeat,
+            createdAt: upcomingGoals.createdAt,
+            updatedAt: upcomingGoals.updatedAt,
+            users: await Promise.all(upcomingGoals.goalUsers.map(async goalUser => {
+                const user = await User.findById(goalUser.userId);
+                return {
+                    _id: goalUser._id,
+                    userId: goalUser.userId,
+                    firstName: user.firstName,
+                    lastName: user.lastName,
+                    goalNumber: goalUser.goalNumber,
+                    createdAt: goalUser.createdAt,
+                    updatedAt: goalUser.updatedAt,
+                };
+            })),
+        }
+        res.status(200).json(upcomingGoalsData);
+    } catch (error) {
+        console.log("Error:", error);
         res.status(500).json({ error: error.message });
     }
 };

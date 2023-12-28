@@ -22,6 +22,9 @@ Router.get("/ended-goals/:_id", auth, goalController.getUserEndedGoals);
 // Get Active Goals Routes
 Router.get("/active-goals", auth, goalController.getActiveGoals);
 
+// Get upcoming Goals Routes
+Router.get("/upcoming-goals", auth, goalController.getUpcomingGoals);
+
 // Get Recruits Details For Goals Routes
 Router.get("/recruits-details", auth, goalController.getRecruiterDetails);
 
