@@ -425,8 +425,9 @@ exports.getActiveGoals = async (req, res) => {
         if (!activeGoals) {
             return res.status(404).json({ error: "No Active Goal Found" })
         }
-        // Map the active goals to the desired response structure
-        const activeGoalsData = {
+         // Map the active goals to the desired response structure
+         const activeGoalsData = {
+            _id: activeGoals._id,
             startDate: activeGoals.startDate,
             endDate: activeGoals.endDate,
             reward: activeGoals.reward,
