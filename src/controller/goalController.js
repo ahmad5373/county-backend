@@ -459,12 +459,32 @@ exports.getActiveGoals = async (req, res) => {
                     (info) => info._id.toString() === goalUser.userId.toString()
                 );
                 const lastUpdated = userLastUpdatedInfo ? userLastUpdatedInfo.latestUpdate.updatedAt : null;
+                // Reuse existing variables for calculating completion and bonus percentages
+                const total = goalUser.goalNumber;
+                const completed = await GoalUserTargets.countDocuments({ goalId: activeGoals._id, userId: goalUser.userId });
+                const remaining = total - completed;
+                let bn = 0;
+                let cp = 0;
+
+                if (remaining < 0) {
+                    const extra = completed - total;
+                    if (activeGoals.bonus > 0) {
+                        bn = Math.min((extra * 100) / activeGoals.bonus, 100);
+                    }
+                    cp = 100;
+                } else if (total > 0) {
+                    cp = (completed * 100) / total;
+                }
+
                 return {
                     _id: goalUser._id,
                     userId: goalUser.userId,
                     firstName: user.firstName,
                     lastName: user.lastName,
                     goalNumber: goalUser.goalNumber,
+                    complete_percentage: parseFloat(cp.toFixed(2)),
+                    bonus: parseFloat(bn.toFixed(2)),
+                    incomplete_percentage: parseFloat((100 - cp).toFixed(2)),
                     createdAt: goalUser.createdAt,
                     updatedAt: goalUser.updatedAt,
                     lastUpdated
