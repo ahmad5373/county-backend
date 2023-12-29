@@ -465,19 +465,18 @@ exports.getActiveGoalWithRecruits = async (req, res) => {
             startDate: { $lte: new Date() },
             endDate: { $gte: new Date() },
         });
-        const _id = activeGoal._id
-
+        
         // Validate if the active goal exists
         if (!activeGoal) {
             return res.status(404).json({ error: 'Active goal not found for the user.' });
         }
 
         // Find all recruits from GoalUserTargets where goalId matches activeGoal and userId is the logged-in user id
-        const userRecruits = await GoalUserTargets.find({ goalId: _id, userId: userId });
+        const userRecruits = await GoalUserTargets.find({ goalId: activeGoal._id, userId: userId });
 
         // Response data to send
         const responseData = {
-            _id: _id,
+            _id: activeGoal._id,
             startDate: activeGoal.startDate,
             endDate: activeGoal.endDate,
             reward: activeGoal.reward,
