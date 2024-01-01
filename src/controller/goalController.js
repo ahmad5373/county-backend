@@ -554,7 +554,9 @@ exports.getRecruiterDetails = async (req, res) => {
             return res.status(403).json({ error: "Forbidden: You don't have permission to create Goal" });
         }
 
-        const { goalId, userId } = req.body;
+        const userId  = req.params.userId;
+        const goalId  = req.params.goalId;
+
         // Validate if goalId and userId are provided
         if (!goalId || !userId) {
             return res.status(400).json({ error: 'Both goalId and userId are required parameters.' });

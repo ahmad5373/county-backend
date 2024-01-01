@@ -26,7 +26,7 @@ Router.get("/active-goals", auth, goalController.getActiveGoals);
 Router.get("/upcoming-goals", auth, goalController.getUpcomingGoals);
 
 // Get Recruits Details For Goals Routes
-Router.get("/recruits-details", auth, goalController.getRecruiterDetails);
+Router.get("/recruits-details/:userId/:goalId", auth, goalController.getRecruiterDetails);
 
 // Get Active Goal With User Id Route
 Router.get("/active-goals/:_id", auth, goalController.getActiveGoalsById);
