@@ -545,29 +545,69 @@ exports.getUpcomingGoals = async (req, res) => {
     }
 };
 
-// Get Recruiter Details With Goal And User ID
 exports.getRecruiterDetails = async (req, res) => {
     try {
-        const adminRole = req.user.user.role
+        const adminRole = req.user.user.role;
+
         // Only Super Admins and Admins can get all Goal
         if (adminRole !== 1 && adminRole !== 2) {
             return res.status(403).json({ error: "Forbidden: You don't have permission to create Goal" });
         }
 
-        const userId  = req.params.userId;
-        const goalId  = req.params.goalId;
+        const userId = req.params.userId;
+        const goalId = req.params.goalId;
 
         // Validate if goalId and userId are provided
         if (!goalId || !userId) {
             return res.status(400).json({ error: 'Both goalId and userId are required parameters.' });
         }
-        const goal = await Goal.findById(goalId); // Find the goal by goalId
+
+        const user = await User.findById(userId);
+        const goal = await Goal.findById(goalId).populate('goalUsers');
+
         if (!goal) {
             return res.status(404).json({ error: 'Goal not found.' });
         }
 
-        // Find all recruits from GoalUserTargets where goalId and userId match
+        const goalUserEntry = goal.goalUsers.find(u => u.userId.toString() === userId);
+
         const recruits = await GoalUserTargets.find({ goalId, userId });
+
+        const bonus = goal.bonus;
+        const goalUsers = goal.goalUsers;
+
+        const totalTarget = goalUsers.reduce((sum, user) => sum + user.goalNumber, 0);
+
+        const userGoalPercentage = [];
+
+        for (const user of goalUsers) {
+            const total = user.goalNumber;
+            const userAchievedTargets = await GoalUserTargets.countDocuments({
+                goalId,
+                userId: user.userId,
+            });
+
+            let bp = 0;
+            let cp = userAchievedTargets >= total ? total : userAchievedTargets;
+
+            if (userAchievedTargets >= total) {
+                bp = bonus > 0 ? Math.min((userAchievedTargets - total) * 100 / bonus, 100) : 0;
+            }
+
+            userGoalPercentage.push({
+                userId: user.userId,
+                completed: cp,
+                bonus: bp,
+            });
+        }
+
+        const cp = userGoalPercentage.reduce((sum, item) => sum + item.completed, 0);
+        const bp = userGoalPercentage.reduce((sum, item) => sum + item.bonus, 0);
+
+        const avgBp = goalUsers.length > 0 ? bp / goalUsers.length : 0;
+        const completedPercentage = goalUsers.length > 0 ? Math.min((cp * 100) / totalTarget, 100) : 0;
+        const incompletePercentage = 100 - completedPercentage;
+
         const responseData = {
             _id: goal._id,
             startDate: goal.startDate,
@@ -576,18 +616,27 @@ exports.getRecruiterDetails = async (req, res) => {
             bonus: goal.bonus,
             repeat: goal.repeat,
             status: goal.status,
+            userName: `${user.firstName} ${user.lastName}`,
+            goalNumber: goalUserEntry.goalNumber,
+            userStates: {
+                completed_percentage: parseFloat(completedPercentage.toFixed(2)),
+                incompleted_percentage: parseFloat(incompletePercentage.toFixed(2)),
+                bonus_percentage: parseFloat(avgBp.toFixed(2)),
+            },
             recruits: recruits.map(recruit => ({
                 _id: recruit._id,
                 recruiterName: recruit.recruit_name,
                 recruiterAt: recruit.recruited_at
             })),
         };
+
         res.status(200).json(responseData);
     } catch (error) {
         console.error(error);
-        res.status(500).json({ error: error.message });
+        res.status(500).json({ error: 'Internal Server Error' });
     }
-}
+};
+
 
 // Get active goals with user Id
 exports.getActiveGoalsById = async (req, res) => {

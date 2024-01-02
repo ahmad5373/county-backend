@@ -443,121 +443,122 @@ exports.permanentDelete = async (req, res) => {
 //Get active Goal on the User Side With Recruits
 exports.getActiveGoalWithRecruits = async (req, res) => {
     try {
+        const adminRole = req.user.user;
+        const userId = req.params._id;
 
-        const adminRole = req.user.user
-        const userId = req.params._id
-        // Only Super Admins and Admins,  can permanent delete user 
         if (adminRole.role !== 1 && adminRole.role !== 2 && adminRole.id !== userId) {
-            return res.status(403).json({ error: "Forbidden: You don't have permission to Delete this user" });
+            return res.status(403).json({ error: "Forbidden: You don't have permission to delete this user" });
         }
 
-        // Find the GoalUser entry for the logged-in user
-        const goalUser = await GoalUser.findOne({
-            userId: userId,
-        });
-        if (!goalUser || goalUser === null) {
-            return res.status(404).json({ error: "No goal data found." })
-        }
-        // Find active goal for the user
-        const activeGoal = await Goal.findOne({
-            _id: goalUser.goalId,
-            status: true,
-            startDate: { $lte: new Date() },
-            endDate: { $gte: new Date() },
-        });
-        
-        // Validate if the active goal exists
-        if (!activeGoal) {
-            return res.status(404).json({ error: 'Active goal not found for the user.' });
+        const goalUserEntries = await GoalUser.find({ userId }).lean();
+
+        if (!goalUserEntries || goalUserEntries.length === 0) {
+            return res.status(404).json({ error: "No goal data found." });
         }
 
-        // Find all recruits from GoalUserTargets where goalId matches activeGoal and userId is the logged-in user id
-        const userRecruits = await GoalUserTargets.find({ goalId: activeGoal._id, userId: userId });
+        const userGoals = await Promise.all(goalUserEntries.map(async (goalUser) => {
+            const activeGoal = await Goal.findOne({
+                _id: goalUser.goalId,
+                status: true,
+                startDate: { $lte: new Date() },
+                endDate: { $gte: new Date() },
+            }).lean();
+            if (!activeGoal) {
+                return null;
+            }
+            const userRecruits = await GoalUserTargets.find({ goalId: activeGoal._id, userId }).lean();
+            return {
+                _id: activeGoal._id,
+                startDate: activeGoal.startDate,
+                endDate: activeGoal.endDate,
+                reward: activeGoal.reward,
+                bonus: activeGoal.bonus,
+                repeat: activeGoal.repeat,
+                status: activeGoal.status,
+                userRecruits: userRecruits.map(({ _id, recruit_name, recruited_at }) => ({
+                    _id,
+                    recruiterName: recruit_name,
+                    recruiterAt: recruited_at,
+                })),
+            };
+        }));
 
-        // Response data to send
-        const responseData = {
-            _id: activeGoal._id,
-            startDate: activeGoal.startDate,
-            endDate: activeGoal.endDate,
-            reward: activeGoal.reward,
-            bonus: activeGoal.bonus,
-            repeat: activeGoal.repeat,
-            status: activeGoal.status,
-            userRecruits: userRecruits.map(recruit => ({
-                _id: recruit._id,
-                recruiterName: recruit.recruit_name,
-                recruiterAt: recruit.recruited_at,
-            })),
-        };
-
-        res.status(200).json(responseData);
+        // Filter out null entries from the map (goals with no data)
+        const filteredUserGoals = userGoals.filter(goal => goal !== null);
+        res.status(200).json(filteredUserGoals);
     } catch (error) {
         console.error(error);
-        res.status(500).json({ error: error.message });
+        res.status(500).json({ error: 'Internal Server Error' });
     }
 };
 
-//Get User Stats With User Id 
+
+//Get user states with userId
 exports.GetUserStats = async (req, res) => {
     try {
-        const adminRole = req.user.user
-        const userId = req.params._id
-        // Only Super Admins and Admins,  can permanent delete user 
+        const adminRole = req.user.user;
+        const userId = req.params._id;
+
         if (adminRole.role !== 1 && adminRole.role !== 2 && adminRole.id !== userId) {
-            return res.status(403).json({ error: "Forbidden: You don't have permission to Delete this user" });
+            return res.status(403).json({ error: "Forbidden: You don't have permission to delete this user" });
         }
 
-        // Find the GoalUser entry for the logged-in user
-        const goalUser = await GoalUser.findOne({
-            userId: userId,
-        });
+        const goalUser = await GoalUser.find({ userId }).lean();
 
-        if (!goalUser || goalUser === null) {
-            return res.status(404).json({ error: "No goal data found." })
+        if (!goalUser || goalUser.length === 0) {
+            return res.status(404).json({ error: "No goal data found." });
         }
 
-        // Find active goal for the user
-        const userActiveGoal = await Goal.findOne({
-            _id: goalUser.goalId,
-            status: true,
-            startDate: { $lte: new Date() },
-            endDate: { $gte: new Date() },
-        }).populate('goalUsers');
+        console.log("goal user", goalUser.length);
 
-        // Validate if the active goal exists
-        if (!userActiveGoal) {
-            return res.status(404).json({ error: 'Active goal not found for the user.' });
-        }
+        const userGoals = await Promise.all(goalUser.map(async (user) => {
+            const userActiveGoal = await Goal.findOne({
+                _id: user.goalId,
+                status: true,
+                startDate: { $lte: new Date() },
+                endDate: { $gte: new Date() },
+            }).populate('goalUsers').lean();
 
-        // Find the specific user within the goalUsers array
-        const user = userActiveGoal.goalUsers.find(u => u.userId.toString() === userId);
-
-        if (!user) {
-            return res.status(404).json({ error: 'User not found in the active goal.' });
-        }
-
-        const totalBonus = userActiveGoal.bonus;
-        const total = user.goalNumber;
-        const completed = await GoalUserTargets.countDocuments({ goalId: userActiveGoal._id, userId });
-        const remaining = total - completed;
-        let bn = 0;
-        let cp = 0;
-
-        if (remaining < 0) {
-            const extra = completed - total;
-            if (totalBonus > 0) {
-                bn = Math.min((extra * 100) / totalBonus, 100);
+            if (!userActiveGoal) {
+                return null;
             }
-            cp = 100;
-        } else if (total > 0) {
-            cp = (completed * 100) / total;
-        }
-        // Format and send the result as JSON
-        res.json({
-            completed_percentage: parseFloat(cp.toFixed(2)),
-            incompleted_percentage: parseFloat((100 - cp).toFixed(2)),
-            bonus_percentage: parseFloat(bn.toFixed(2)),
-        });
+
+            const goalUserEntry = userActiveGoal.goalUsers.find(u => u.userId.toString() === userId);
+
+            if (!goalUserEntry) {
+                return null;
+            }
+
+            const { bonus: totalBonus } = userActiveGoal;
+            const { goalNumber: total } = goalUserEntry;
+
+            const completed = await GoalUserTargets.countDocuments({ goalId: userActiveGoal._id, userId });
+            const remaining = total - completed;
+            let bn = 0;
+            let cp = 0;
+
+            if (remaining < 0) {
+                const extra = completed - total;
+                if (totalBonus > 0) {
+                    bn = Math.min((extra * 100) / totalBonus, 100);
+                }
+                cp = 100;
+            } else if (total > 0) {
+                cp = (completed * 100) / total;
+            }
+
+            return {
+                goalId: userActiveGoal._id,
+                completed_percentage: parseFloat(cp.toFixed(2)),
+                incompleted_percentage: parseFloat((100 - cp).toFixed(2)),
+                bonus_percentage: parseFloat(bn.toFixed(2)),
+            };
+        }));
+
+        // Filter out null entries from the map (goals with no data)
+        const filteredUserGoals = userGoals.filter(goal => goal !== null);
+
+        res.status(200).json(filteredUserGoals);
     } catch (error) {
         console.error(error);
         res.status(500).json({ error: 'Internal Server Error' });
