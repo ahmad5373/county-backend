@@ -511,8 +511,6 @@ exports.GetUserStats = async (req, res) => {
             return res.status(404).json({ error: "No goal data found." });
         }
 
-        console.log("goal user", goalUser.length);
-
         const userGoals = await Promise.all(goalUser.map(async (user) => {
             const userActiveGoal = await Goal.findOne({
                 _id: user.goalId,
