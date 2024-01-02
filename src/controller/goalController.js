@@ -569,44 +569,30 @@ exports.getRecruiterDetails = async (req, res) => {
             return res.status(404).json({ error: 'Goal not found.' });
         }
 
+        const recruits = await GoalUserTargets.find({ goalId, userId });
         const goalUserEntry = goal.goalUsers.find(u => u.userId.toString() === userId);
 
-        const recruits = await GoalUserTargets.find({ goalId, userId });
-
-        const bonus = goal.bonus;
-        const goalUsers = goal.goalUsers;
-
-        const totalTarget = goalUsers.reduce((sum, user) => sum + user.goalNumber, 0);
-
-        const userGoalPercentage = [];
-
-        for (const user of goalUsers) {
-            const total = user.goalNumber;
-            const userAchievedTargets = await GoalUserTargets.countDocuments({
-                goalId,
-                userId: user.userId,
-            });
-
-            let bp = 0;
-            let cp = userAchievedTargets >= total ? total : userAchievedTargets;
-
-            if (userAchievedTargets >= total) {
-                bp = bonus > 0 ? Math.min((userAchievedTargets - total) * 100 / bonus, 100) : 0;
-            }
-
-            userGoalPercentage.push({
-                userId: user.userId,
-                completed: cp,
-                bonus: bp,
-            });
+        if (!goalUserEntry) {
+            return res.status(404).json({ error: 'User not found in the goal.' });
         }
 
-        const cp = userGoalPercentage.reduce((sum, item) => sum + item.completed, 0);
-        const bp = userGoalPercentage.reduce((sum, item) => sum + item.bonus, 0);
+        const { bonus: totalBonus } = goal;
+        const { goalNumber: total } = goalUserEntry;
 
-        const avgBp = goalUsers.length > 0 ? bp / goalUsers.length : 0;
-        const completedPercentage = goalUsers.length > 0 ? Math.min((cp * 100) / totalTarget, 100) : 0;
-        const incompletePercentage = 100 - completedPercentage;
+        const completed = await GoalUserTargets.countDocuments({ goalId: goal._id, userId });
+        const remaining = total - completed;
+        let bn = 0;
+        let cp = 0;
+
+        if (remaining < 0) {
+            const extra = completed - total;
+            if (totalBonus > 0) {
+                bn = Math.min((extra * 100) / totalBonus, 100);
+            }
+            cp = 100;
+        } else if (total > 0) {
+            cp = (completed * 100) / total;
+        }
 
         const responseData = {
             _id: goal._id,
@@ -619,9 +605,9 @@ exports.getRecruiterDetails = async (req, res) => {
             userName: `${user.firstName} ${user.lastName}`,
             goalNumber: goalUserEntry.goalNumber,
             userStates: {
-                completed_percentage: parseFloat(completedPercentage.toFixed(2)),
-                incompleted_percentage: parseFloat(incompletePercentage.toFixed(2)),
-                bonus_percentage: parseFloat(avgBp.toFixed(2)),
+                completed_percentage: parseFloat(cp.toFixed(2)),
+                incompleted_percentage: parseFloat((100 - cp).toFixed(2)),
+                bonus_percentage: parseFloat(bn.toFixed(2)),
             },
             recruits: recruits.map(recruit => ({
                 _id: recruit._id,
