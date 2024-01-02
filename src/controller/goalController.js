@@ -440,6 +440,12 @@ exports.getActiveGoals = async (req, res) => {
                 }
             }
         ]);
+        // Fetch the goal document with populated goalUsers
+        const goal = await Goal.findById(goalId).populate('goalUsers');
+        if (!goal) {
+            return res.status(404).json({ error: 'Goal not found' });
+        }
+        const goalStates = await calculateUserStates(goal.goalUsers); // call function to calculate goals states
         const activeGoalsData = {
             _id: activeGoals._id,
             startDate: activeGoals.startDate,
@@ -449,6 +455,7 @@ exports.getActiveGoals = async (req, res) => {
             repeat: activeGoals.repeat,
             createdAt: activeGoals.createdAt,
             updatedAt: activeGoals.updatedAt,
+            goalStates:goalStates,
             users: await Promise.all(activeGoals.goalUsers.map(async goalUser => {
                 // console.log("goals users", goalUser);
                 const user = await User.findById(goalUser.userId);
