@@ -290,28 +290,28 @@ exports.resetPassword = async (req, res) => {
 
 
 //Forget-password 
-exports.ForgetPassword  = async (req,res) =>{
+exports.ForgetPassword = async (req, res) => {
     try {
-        const user = await User.findOne({email: req.body.email})
-        if(!user){
-            return res.status(404).json({error: "User Not Found"})
+        const user = await User.findOne({ email: req.body.email })
+        if (!user) {
+            return res.status(404).json({ error: "User Not Found" })
         }
         //Generate Token for reset and expiration time 
         const resetToken = crypto.randomBytes(20).toString('hex');
-        user.resetPasswordToken = resetToken ;
+        user.resetPasswordToken = resetToken;
         user.resetPasswordExpire = Date.now() + 3600000 // Token Expire in One hour 
         await user.save();
 
-         // Create a password reset link
-         const resetLink = `http://127.0.0.1:5500/resetPassword.html/reset-password?token=${resetToken}`;
-         
-         //Compose email 
-         const subject = "Password Reset Request";
-         const html =`Click the following link to reset your password: <a href="${resetLink}">${resetLink}</a>`;
+        // Create a password reset link
+        const resetLink = `http://127.0.0.1:5500/resetPassword.html/reset-password?token=${resetToken}`;
 
-         await sendMail(user.email , subject , html);
+        //Compose email 
+        const subject = "Password Reset Request";
+        const html = `Click the following link to reset your password: <a href="${resetLink}">${resetLink}</a>`;
 
-         res.status(200).json({message: "Password reset link sent to your email "})
+        await sendMail(user.email, subject, html);
+
+        res.status(200).json({ message: "Password reset link sent to your email " })
     } catch (error) {
         console.error("Error while processing forgot password request:", error.message);
         res.status(500).json({ error: error.message });
@@ -319,15 +319,15 @@ exports.ForgetPassword  = async (req,res) =>{
 }
 
 
-exports.firstResetPassword = async(req,res)=>{
+exports.firstResetPassword = async (req, res) => {
     try {
-        const {token , newPassword , confirmPassword }= req.body;
+        const { token, newPassword, confirmPassword } = req.body;
         const user = await User.findOne({
-            resetPasswordToken: token ,
-            resetPasswordExpire: {$gt: Date.now()},
+            resetPasswordToken: token,
+            resetPasswordExpire: { $gt: Date.now() },
         });
-        if(!user){
-            return res.status(400).json({error: "Invalid Or Token Expired"});
+        if (!user) {
+            return res.status(400).json({ error: "Invalid Or Token Expired" });
         }
 
         // Check if the new password and confirm password match
@@ -337,7 +337,7 @@ exports.firstResetPassword = async(req,res)=>{
 
         //Update Password with new Password
         const salt = await bcrypt.genSalt(10);
-        const hashedPassword = await bcrypt.hash(newPassword , salt);
+        const hashedPassword = await bcrypt.hash(newPassword, salt);
         user.password = hashedPassword;
 
         //Clear Reset Token Field 
@@ -345,10 +345,10 @@ exports.firstResetPassword = async(req,res)=>{
         user.resetPasswordExpire = undefined;
 
         await user.save();
-        res.status(200).json({message:"Password Reset Successfully."});
+        res.status(200).json({ message: "Password Reset Successfully." });
     } catch (error) {
         console.log("Error While resetting password ", error.message);
-        res.status(500).json({error: error.message});
+        res.status(500).json({ error: error.message });
     }
 }
 
@@ -485,7 +485,9 @@ exports.getActiveGoalWithRecruits = async (req, res) => {
 
         // Filter out null entries from the map (goals with no data)
         const filteredUserGoals = userGoals.filter(goal => goal !== null);
-        res.status(200).json(filteredUserGoals);
+        // If there's only one active goal, return it directly, otherwise return the array
+        const response = filteredUserGoals.length === 1 ? filteredUserGoals[0] : { error: 'No active goal found' };
+        res.status(200).json(response);
     } catch (error) {
         console.error(error);
         res.status(500).json({ error: 'Internal Server Error' });
@@ -557,8 +559,9 @@ exports.GetUserStats = async (req, res) => {
 
         // Filter out null entries from the map (goals with no data)
         const filteredUserGoals = userGoals.filter(goal => goal !== null);
-
-        res.status(200).json(filteredUserGoals);
+        // If there's only one active goal, return it directly, otherwise return Error
+        const response = filteredUserGoals.length === 1 ? filteredUserGoals[0] : { error: 'No active goal found' };
+        res.status(200).json(response);
     } catch (error) {
         console.error(error);
         res.status(500).json({ error: 'Internal Server Error' });

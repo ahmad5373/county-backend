@@ -641,58 +641,120 @@ exports.getRecruiterDetails = async (req, res) => {
 // Get active goals with user Id
 exports.getActiveGoalsById = async (req, res) => {
     try {
+        const adminRole = req.user.user;
+        const userId = req.params._id;
 
-        const adminRole = req.user.user
-        const userId = req.params._id
         // Validate if the provided ID is a valid ObjectId
         if (!mongoose.isValidObjectId(userId)) {
             return res.status(400).json({ error: "Invalid _id" });
         }
 
-        // Only Super Admins and Admins,  can permanent delete user 
-        if (adminRole.role !== 1 && adminRole.role !== 2 && adminRole.id !== userId) {
-            return res.status(403).json({ error: "Forbidden: You don't have permission to Delete this user" });
+        // Only Super Admins and Admins can access this information
+        if (adminRole.role !== 1 && adminRole.role !== 2) {
+            return res.status(403).json({ error: "Forbidden: You don't have permission to access this data" });
+        }
+        // Find all goals for the user
+        const userAllGoals = await GoalUser.find({ userId }).lean();
+
+        if (!userAllGoals || userAllGoals.length === 0) {
+            return res.status(404).json({ error: 'No goals found for the user' });
         }
 
-        // Find the GoalUser entry for the logged-in user
-        const goalUser = await GoalUser.findOne({
-            userId: userId,
-        });
-        if (!goalUser || goalUser === null) {
-            return res.status(404).json({ error: "No goal data found." })
-        }
+        // Find the first active goal among the user's goals
+        const userGoals = await Promise.all(userAllGoals.map(async (goalUser) => {
+            const activeGoal = await Goal.findOne({
+                _id: goalUser.goalId,
+                status: true,
+                startDate: { $lte: new Date() },
+                endDate: { $gte: new Date() },
+            }).populate('goalUsers').lean();
 
-        const activeGoals = await Goal.find({
-            _id: goalUser.goalId, // Filter by the provided goal ID
-            startDate: { $lte: new Date() },
-            endDate: { $gte: new Date() },
-            status: true, // Assuming status is also true for active goals
-        }).populate('goalUsers');
+            if (!activeGoal) {
+                return null;
+            }
 
-        if (!activeGoals || activeGoals.length === 0) {
-            return res.status(404).json({ error: 'Goal not found' });
-        }
-        // Map the active goals to the desired response structure
-        const activeGoalsData = activeGoals.map(goal => ({
-            startDate: goal.startDate,
-            endDate: goal.endDate,
-            reward: goal.reward,
-            bonus: goal.bonus,
-            repeat: goal.repeat,
-            users: goal.goalUsers.map(goalUser => ({
-                userId: goalUser.userId,
-                goalId: goalUser.goalId,
-                goalNumber: goalUser.goalNumber
-            }))
+            const goalId = activeGoal ? activeGoal._id : null;
+            const userIds = activeGoal ? activeGoal.goalUsers.map(goalUser => goalUser.userId) : [];
+
+            // Find the last updated information for each user
+            const lastUpdatedInfo = await GoalUserTargets.aggregate([
+                {
+                    $match: {
+                        goalId,
+                        userId: { $in: userIds }
+                    }
+                },
+                {
+                    $sort: { recruited_at: -1 }
+                },
+                {
+                    $group: {
+                        _id: "$userId",
+                        latestUpdate: { $first: "$$ROOT" }
+                    }
+                }
+            ]);
+
+            return {
+                _id: activeGoal._id,
+                startDate: activeGoal.startDate,
+                endDate: activeGoal.endDate,
+                reward: activeGoal.reward,
+                bonus: activeGoal.bonus,
+                repeat: activeGoal.repeat,
+                createdAt: activeGoal.createdAt,
+                updatedAt: activeGoal.updatedAt,
+                users: await Promise.all(activeGoal.goalUsers.map(async goalUser => {
+                    const user = await User.findById(goalUser.userId);
+                    const userLastUpdatedInfo = lastUpdatedInfo.find(
+                        (info) => info._id.toString() === goalUser.userId.toString()
+                    );
+                    const lastUpdated = userLastUpdatedInfo ? userLastUpdatedInfo.latestUpdate.updatedAt : null;
+
+                    const total = goalUser.goalNumber;
+                    const completed = await GoalUserTargets.countDocuments({ goalId: activeGoal._id, userId: goalUser.userId });
+                    const remaining = total - completed;
+                    let bn = 0;
+                    let cp = 0;
+
+                    if (remaining < 0) {
+                        const extra = completed - total;
+                        if (activeGoal.bonus > 0) {
+                            bn = Math.min((extra * 100) / activeGoal.bonus, 100);
+                        }
+                        cp = 100;
+                    } else if (total > 0) {
+                        cp = (completed * 100) / total;
+                    }
+
+                    return {
+                        _id: goalUser._id,
+                        userId: goalUser.userId,
+                        firstName: user.firstName,
+                        lastName: user.lastName,
+                        goalNumber: goalUser.goalNumber,
+                        complete_percentage: parseFloat(cp.toFixed(2)),
+                        bonus: parseFloat(bn.toFixed(2)),
+                        incomplete_percentage: parseFloat((100 - cp).toFixed(2)),
+                        createdAt: goalUser.createdAt,
+                        updatedAt: goalUser.updatedAt,
+                        lastUpdated
+                    };
+                })),
+            };
         }));
 
-        res.status(200).json(activeGoalsData);
+        // Filter out null entries from the map (goals with no data)
+        const filteredUserGoals = userGoals.filter(goal => goal !== null);
+        // If there's only one active goal, return it directly, otherwise return Error
+        const response = filteredUserGoals.length === 1 ? filteredUserGoals[0] :{ error: 'No active goal found' };
+        res.status(200).json(response);
     } catch (error) {
-        console.log("err", error);
         console.error(error);
         res.status(500).json({ error: error.message });
     }
 };
+
 
 
 // Get a single goal by ID with associated users
