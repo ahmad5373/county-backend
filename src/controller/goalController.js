@@ -310,42 +310,43 @@ exports.getAllGoals = async (req, res) => {
 // Get All Ended Goals With Associated Users
 exports.getAllEndedGoals = async (req, res) => {
     try {
-        const adminRole = req.user.user.role
+        const adminRole = req.user.user.role;
         // Only Super Admins and Admins can get all Goal
         if (adminRole !== 1 && adminRole !== 2) {
             return res.status(403).json({ error: "Forbidden: You don't have permission to create Goal" });
         }
-        // Populate the 'goalUsers' array in the 'Goal' documents to get associated users
         const goals = await Goal.find({
             $or: [
                 { status: false },
                 { endDate: { $lt: new Date() } }
             ]
         }).populate('goalUsers');
-        if (!goals) { return res.status(404).json({ error: "No Goals Found." }) }
-        if (goals.length > 0) {
-            // Map the goals to the desired response structure
-            const goalsData = goals.map(goal => ({
+
+        if (!goals || goals.length === 0) {
+            return res.status(404).json({ error: "No Goals Found." });
+        }
+
+        const goalsData = await Promise.all(goals.map(async (goal) => {
+            const goalStates = await calculateUserStates(goal.goalUsers); // call function to calculate goals states
+            return {
+                _id: goal._id,
                 startDate: goal.startDate,
                 endDate: goal.endDate,
                 reward: goal.reward,
                 bonus: goal.bonus,
                 repeat: goal.repeat,
-                users: goal.goalUsers.map(goalUser => ({
-                    userId: goalUser.userId,
-                    goalId: goalUser.goalId,
-                    goalNumber: goalUser.goalNumber
-                }))
-            }));
-            res.status(200).json(goalsData);
-        } else {
-            res.status(200).json(goals);
-        }
+                goalStates: goalStates,
+            };
+        }));
+
+        res.status(200).json(goalsData);
     } catch (error) {
         console.error(error);
         res.status(500).json({ error: error.message });
     }
 };
+
+
 
 // Get Ended Goals And Users Data  with  User Id 
 exports.getUserEndedGoals = async (req, res) => {
@@ -381,24 +382,20 @@ exports.getUserEndedGoals = async (req, res) => {
             return res.status(404).json({ error: "No Goals Found." })
         }
 
-        if (goals.length > 0) {
-            // Map the goals to the desired response structure
-            const goalsData = goals.map(goal => ({
+        const goalsData = await Promise.all(goals.map(async (goal) => {
+            const goalStates = await calculateUserStates(goal.goalUsers); // call function to calculate goals states
+            return {
+                _id: goal._id,
                 startDate: goal.startDate,
                 endDate: goal.endDate,
                 reward: goal.reward,
                 bonus: goal.bonus,
                 repeat: goal.repeat,
-                users: goal.goalUsers.map(goalUser => ({
-                    userId: goalUser.userId,
-                    goalId: goalUser.goalId,
-                    goalNumber: goalUser.goalNumber
-                }))
-            }));
-            res.status(200).json(goalsData);
-        } else {
-            res.status(200).json(goals);
-        }
+                goalStates: goalStates,
+            };
+        }));
+
+        res.status(200).json(goalsData);
     } catch (error) {
         console.error(error);
         res.status(500).json({ error: error.message });
@@ -934,60 +931,62 @@ exports.getStats = async (req, res) => {
         if (!goal) {
             return res.status(404).json({ error: 'Goal not found' });
         }
-
-        const bonus = goal.bonus;
-        const goalUsers = goal.goalUsers;
-
-        // Calculate totalTarget by summing the 'goalNumber' property for all users
-        const totalTarget = goalUsers.reduce((sum, user) => sum + user.goalNumber, 0);
-
-        // Initialize an array to store user goal completion percentages
-        const userGoalPercentage = [];
-
-        // Iterate through each GoalUser record
-        for (const user of goalUsers) {
-            const total = user.goalNumber;
-            const userAchievedTargets = await GoalUserTargets.countDocuments({
-                goalId,
-                userId: user.userId,
-            });
-
-            let bp = 0;
-            let cp = userAchievedTargets >= total ? total : userAchievedTargets;
-
-            // Check if the user has achieved all targets
-            if (userAchievedTargets >= total) {
-                // Calculate bonus percentage for the user
-                bp = bonus > 0 ? Math.min((userAchievedTargets - total) * 100 / bonus, 100) : 0;
-
-            }
-
-            userGoalPercentage.push({
-                userId: user.userId,
-                completed: cp,
-                bonus: bp,
-            });
-        }
-
-        // Calculate total completed and bonus percentages
-        const cp = userGoalPercentage.reduce((sum, item) => sum + item.completed, 0);
-        const bp = userGoalPercentage.reduce((sum, item) => sum + item.bonus, 0);
-
-        // Calculate average bonus percentage and overall completed percentage
-        const avgBp = goalUsers.length > 0 ? bp / goalUsers.length : 0;
-        const completedPercentage = goalUsers.length > 0 ? Math.min((cp * 100) / totalTarget, 100) : 0;
-
-        // Calculate incomplete percentage based on completed percentage
-        const incompletePercentage = 100 - completedPercentage;
-
-        // Format and send the result as JSON
-        res.json({
-            completed_percentage: parseFloat(completedPercentage.toFixed(2)),
-            incompleted_percentage: parseFloat(incompletePercentage.toFixed(2)),
-            bonus_percentage: parseFloat(avgBp.toFixed(2)),
-        });
+        const goalStates = await calculateUserStates(goal.goalUsers); // call function to calculate goals states
+        res.status(200).json(goalStates)
     } catch (error) {
         console.error(error);
         res.status(500).json({ error: 'Internal Server Error' });
     }
 };
+
+
+// Helper function to calculate user states for a given array of goalUsers
+async function calculateUserStates(goalUsers) {
+    // Initialize an array to store user goal completion percentages
+    const userGoalPercentage = [];
+
+    // Iterate through each GoalUser record
+    for (const user of goalUsers) {
+        const bonus = user.bonus; // Assuming bonus is a property of user, not goal
+        const total = user.goalNumber;
+
+        const userAchievedTargets = await GoalUserTargets.countDocuments({
+            goalId: user.goalId,
+            userId: user.userId,
+        });
+
+        let bp = 0;
+        let cp = userAchievedTargets >= total ? total : userAchievedTargets;
+
+        // Check if the user has achieved all targets
+        if (userAchievedTargets >= total) {
+            // Calculate bonus percentage for the user
+            bp = bonus > 0 ? Math.min((userAchievedTargets - total) * 100 / bonus, 100) : 0;
+        }
+
+        userGoalPercentage.push({
+            userId: user.userId,
+            completed: cp,
+            bonus: bp,
+        });
+    }
+
+    // Calculate total completed and bonus percentages
+    const cp = userGoalPercentage.reduce((sum, item) => sum + item.completed, 0);
+    const bp = userGoalPercentage.reduce((sum, item) => sum + item.bonus, 0);
+
+    // Calculate average bonus percentage and overall completed percentage
+    const avgBp = goalUsers.length > 0 ? bp / goalUsers.length : 0;
+    const totalTarget = goalUsers.reduce((sum, user) => sum + user.goalNumber, 0);
+    const completedPercentage = goalUsers.length > 0 ? Math.min((cp * 100) / totalTarget, 100) : 0;
+
+    // Calculate incomplete percentage based on completed percentage
+    const incompletePercentage = 100 - completedPercentage;
+
+    // Format and return the result
+    return {
+        completed_percentage: parseFloat(completedPercentage.toFixed(2)),
+        incompleted_percentage: parseFloat(incompletePercentage.toFixed(2)),
+        bonus_percentage: parseFloat(avgBp.toFixed(2)),
+    };
+}
