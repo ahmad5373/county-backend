@@ -10,6 +10,15 @@ const crypto = require("crypto");
 const sendMail = require("../middlewares/sendMail");
 
 
+// Function to validate if an ID is a valid ObjectId
+const validateObjectId = (id, res) => {
+    if (!mongoose.isValidObjectId(id)) {
+        res.status(400).json({ error: "Invalid _id" });
+        return false;
+    }
+    return true;
+};
+
 //User Signup
 exports.signup = async (req, res) => {
     try {
@@ -34,7 +43,6 @@ exports.signup = async (req, res) => {
         res.status(500).json({ error: error.message });
     }
 };
-
 
 //Creation User By Super Admin & Admin
 exports.createUser = async (req, res) => {
@@ -71,7 +79,6 @@ exports.createUser = async (req, res) => {
     }
 };
 
-
 //User Login 
 exports.login = async (req, res) => {
     try {
@@ -104,7 +111,6 @@ exports.login = async (req, res) => {
     }
 };
 
-
 //Get All Users
 exports.getAllUser = async (req, res) => {
     try {
@@ -126,14 +132,11 @@ exports.getUserById = async (req, res) => {
     try {
         const userId = req.params._id;
         const adminRole = req.user.user
+        if (!validateObjectId(userId, res)) return;
+        
         // Only Super Admins, Admins, and the user themselves can view user details
         if (adminRole.role !== 1 && adminRole.role !== 2 && adminRole.id !== userId) {
             return res.status(403).json({ error: "Forbidden: You don't have permission to view this user" });
-        }
-
-        // Validate if the provided ID is a valid ObjectId
-        if (!mongoose.isValidObjectId(userId)) {
-            return res.status(400).json({ error: "Invalid _id" });
         }
 
         const user = await User.findById(userId);
@@ -146,7 +149,6 @@ exports.getUserById = async (req, res) => {
         res.status(500).json({ error: error.message });
     }
 };
-
 
 //Update User With UserId By Admin
 exports.updateUser = async (req, res) => {
@@ -164,11 +166,7 @@ exports.updateUser = async (req, res) => {
         if (adminRole === 2 && (user.role === 1 || user.role === 2)) {
             return res.status(403).json({ error: "Forbidden: Admins cannot edit Super Admins or Admins" });
         }
-
-        // Validate if the provided ID is a valid ObjectId
-        if (!mongoose.isValidObjectId(userId)) {
-            return res.status(400).json({ error: "Invalid _id" });
-        }
+        if (!validateObjectId(userId, res)) return;
 
         const user = await User.findById(userId);
         if (!user || user.deleted === true) {
@@ -217,11 +215,7 @@ exports.changePassword = async (req, res) => {
             return res.status(403).json({ error: "Forbidden: You don't have permission to Change this user Password" });
         }
         const { oldPassword, newPassword, confirmPassword } = req.body;
-
-        // Validate if the provided ID is a valid ObjectId
-        if (!mongoose.isValidObjectId(userId)) {
-            return res.status(400).json({ error: "Invalid _id" });
-        }
+        if (!validateObjectId(userId, res)) return;
 
         const user = await User.findById(userId);
         if (!user || user.deleted === true) {
@@ -264,10 +258,7 @@ exports.resetPassword = async (req, res) => {
         }
 
         const password = "password"
-        // Validate if the provided ID is a valid ObjectId
-        if (!mongoose.isValidObjectId(userId)) {
-            return res.status(400).json({ error: "Invalid _id" });
-        }
+        if (!validateObjectId(userId, res)) return;
 
         const user = await User.findById(userId);
         if (!user || user.deleted === true) {
@@ -290,7 +281,7 @@ exports.resetPassword = async (req, res) => {
 
 
 //Forget-password 
-exports.ForgetPassword = async (req, res) => {
+exports.forgetPassword = async (req, res) => {
     try {
         const user = await User.findOne({ email: req.body.email })
         if (!user) {
@@ -365,10 +356,8 @@ exports.changeStatus = async (req, res) => {
             return res.status(403).json({ error: "Forbidden: You don't have permission to change  user status" });
         }
 
-        // Validate if the provided ID is a valid ObjectId
-        if (!mongoose.isValidObjectId(userId)) {
-            return res.status(400).json({ error: "Invalid _id" });
-        }
+        if (!validateObjectId(userId, res)) return;
+
         // return error if status is not found or undefined
         if (userStatus === undefined) {
             return res.status(400).json({ error: "Status is not Provided" });
@@ -396,10 +385,7 @@ exports.softDelete = async (req, res) => {
             return res.status(403).json({ error: "Forbidden: You don't have permission to Delete this user" });
         }
 
-        // Validate if the provided ID is a valid ObjectId
-        if (!mongoose.isValidObjectId(userId)) {
-            return res.status(400).json({ error: "Invalid _id" });
-        }
+         if (!validateObjectId(userId, res)) return;
 
         const user = await User.findById(userId);
         if (!user || user.deleted === true) {
@@ -423,11 +409,7 @@ exports.permanentDelete = async (req, res) => {
         if (adminRole !== 1 && adminRole !== 2) {
             return res.status(403).json({ error: "Forbidden: You don't have permission to Delete this user" });
         }
-
-        // Validate if the provided ID is a valid ObjectId
-        if (!mongoose.isValidObjectId(userId)) {
-            return res.status(400).json({ error: "Invalid _id" });
-        }
+        if (!validateObjectId(userId, res)) return;
 
         const user = await User.findByIdAndDelete(userId);
         if (!user) {
@@ -449,7 +431,7 @@ exports.getActiveGoalWithRecruits = async (req, res) => {
         if (adminRole.role !== 1 && adminRole.role !== 2 && adminRole.id !== userId) {
             return res.status(403).json({ error: "Forbidden: You don't have permission to delete this user" });
         }
-
+        if (!validateObjectId(userId, res)) return;
         const goalUserEntries = await GoalUser.find({ userId }).lean();
 
         if (!goalUserEntries || goalUserEntries.length === 0) {
@@ -496,7 +478,7 @@ exports.getActiveGoalWithRecruits = async (req, res) => {
 
 
 //Get user states with userId
-exports.GetUserStats = async (req, res) => {
+exports.getUserStats = async (req, res) => {
     try {
         const adminRole = req.user.user;
         const userId = req.params._id;
@@ -504,7 +486,7 @@ exports.GetUserStats = async (req, res) => {
         if (adminRole.role !== 1 && adminRole.role !== 2 && adminRole.id !== userId) {
             return res.status(403).json({ error: "Forbidden: You don't have permission to delete this user" });
         }
-
+        if (!validateObjectId(userId, res)) return;
         const goalUser = await GoalUser.find({ userId }).lean();
 
         if (!goalUser || goalUser.length === 0) {
@@ -565,3 +547,95 @@ exports.GetUserStats = async (req, res) => {
         res.status(500).json({ error: 'Internal Server Error' });
     }
 };
+
+
+// Get Ended Goals And Users Data  with  User Id 
+exports.getUserEndedGoals = async (req, res) => {
+    try {
+        const userId = req.params._id;
+        const adminRole = req.user.user
+        // Only Super Admins and Admins can get all Goal
+        if (adminRole.role !== 1 && adminRole.role !== 2 && adminRole.id !== userId) {
+            return res.status(403).json({ error: "Forbidden: You don't have permission to create Goal" });
+        }
+        if (!validateObjectId(userId, res)) return;
+        // Step 1: Find GoalUser  With Given userId
+        const userGoalDocs = await GoalUser.find({ userId });
+        // Step 2: Get the goalIds from the found GoalUser documents
+        const goalIds = userGoalDocs.map(userGoal => userGoal.goalId);
+        // Step 3: Find the associated Goal documents based on goalIds
+        const goals = await Goal.find({
+            $and: [
+                {
+                    $or: [
+                        { status: false },
+                        { endDate: { $lt: new Date() } }
+                    ]
+                },
+                { _id: { $in: goalIds } }
+            ]
+        }).populate('goalUsers');
+
+        if (!goals) {
+            return res.status(404).json({ error: "No Goals Found." })
+        }
+
+        const goalsData = await Promise.all(goals.map(async (goal) => {
+            const goalStates = await calculateGoalStates(goal.goalUsers); // call function to calculate goals states
+            return {
+                _id: goal._id,
+                startDate: goal.startDate,
+                endDate: goal.endDate,
+                reward: goal.reward,
+                bonus: goal.bonus,
+                repeat: goal.repeat,
+                goalStates: goalStates,
+            };
+        }));
+
+        res.status(200).json(goalsData);
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ error: error.message });
+    }
+};
+
+// Helper function to calculate goal states for all users
+async function calculateGoalStates(goalUsers) {
+    const userGoalPercentage = [];
+
+    for (const user of goalUsers) {
+        const bonus = user.bonus;
+        const total = user.goalNumber;
+        const userAchievedTargets = await GoalUserTargets.countDocuments({
+            goalId: user.goalId,
+            userId: user.userId,
+        });
+
+        let bp = 0;
+        let cp = userAchievedTargets >= total ? total : userAchievedTargets;
+
+        if (userAchievedTargets >= total) {
+            bp = bonus > 0 ? Math.min((userAchievedTargets - total) * 100 / bonus, 100) : 0;
+        }
+
+        userGoalPercentage.push({
+            userId: user.userId,
+            completed: cp,
+            bonus: bp,
+        });
+    }
+
+    const cp = userGoalPercentage.reduce((sum, item) => sum + item.completed, 0);
+    const bp = userGoalPercentage.reduce((sum, item) => sum + item.bonus, 0);
+    const avgBp = goalUsers.length > 0 ? bp / goalUsers.length : 0;
+    const totalTarget = goalUsers.reduce((sum, user) => sum + user.goalNumber, 0);
+    const completedPercentage = goalUsers.length > 0 ? Math.min((cp * 100) / totalTarget, 100) : 0;
+    const incompletePercentage = 100 - completedPercentage;
+
+    return {
+        completed_percentage: parseFloat(completedPercentage.toFixed(2)),
+        incompleted_percentage: parseFloat(incompletePercentage.toFixed(2)),
+        bonus_percentage: parseFloat(avgBp.toFixed(2)),
+    };
+}

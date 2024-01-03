@@ -307,7 +307,7 @@ exports.getAllGoals = async (req, res) => {
     }
 };
 
-// Get All Ended Goals With Associated Users
+// Get All Ended Goals 
 exports.getAllEndedGoals = async (req, res) => {
     try {
         const adminRole = req.user.user.role;
@@ -449,6 +449,7 @@ exports.getUpcomingGoals = async (req, res) => {
     }
 };
 
+//Get goal details recruits and states with goalId and userId
 exports.getRecruiterDetails = async (req, res) => {
     try {
         const adminRole = req.user.user.role;
@@ -460,6 +461,8 @@ exports.getRecruiterDetails = async (req, res) => {
 
         const userId = req.params.userId;
         const goalId = req.params.goalId;
+        if (!validateObjectId(userId, res)) return;
+        if (!validateObjectId(goalId, res)) return;
 
         // Validate if goalId and userId are provided
         if (!goalId || !userId) {
@@ -502,17 +505,12 @@ exports.getRecruiterDetails = async (req, res) => {
     }
 };
 
-
 // Get active goals with user Id
 exports.getActiveGoalsById = async (req, res) => {
     try {
         const adminRole = req.user.user;
         const userId = req.params._id;
-
-        // Validate if the provided ID is a valid ObjectId
-        if (!mongoose.isValidObjectId(userId)) {
-            return res.status(400).json({ error: "Invalid _id" });
-        }
+        if (!validateObjectId(userId, res)) return;
 
         // Only Super Admins and Admins can access this information
         if (adminRole.role !== 1 && adminRole.role !== 2) {
@@ -586,11 +584,7 @@ exports.getEndedGoalsById = async (req, res) => {
     try {
         const adminRole = req.user.user;
         const goalId = req.params._id;
-
-        // Validate if the provided ID is a valid ObjectId
-        if (!mongoose.isValidObjectId(goalId)) {
-            return res.status(400).json({ error: "Invalid _id" });
-        }
+        if (!validateObjectId(goalId, res)) return;
 
         // Only Super Admins and Admins can access this information
         if (adminRole.role !== 1 && adminRole.role !== 2) {
@@ -661,11 +655,8 @@ exports.getGoalById = async (req, res) => {
         if (adminRole !== 1 && adminRole !== 2) {
             return res.status(403).json({ error: "Forbidden: You don't have permission to view this Goal" });
         }
+        if (!validateObjectId(goalId, res)) return;
 
-        // Validate if the provided ID is a valid ObjectId
-        if (!mongoose.isValidObjectId(goalId)) {
-            return res.status(400).json({ error: "Invalid _id" });
-        }
         const goal = await Goal.findById(goalId);
         const goalUsers = await GoalUser.find({ goalId: goalId })
 
@@ -703,10 +694,8 @@ exports.updateGoalById = async (req, res) => {
             return res.status(403).json({ error: "Forbidden: You don't have permission to view this user" });
         }
 
-        // Validate if the provided ID is a valid ObjectId
-        if (!mongoose.isValidObjectId(goalId)) {
-            return res.status(400).json({ error: "Invalid _id" });
-        }
+        if (!validateObjectId(goalId, res)) return;
+
 
         const updatedGoal = await Goal.findByIdAndUpdate(goalId, req.body, { new: true });
         if (!updatedGoal) {
@@ -799,11 +788,8 @@ exports.endGoalById = async (req, res) => {
         if (adminRole !== 1 && adminRole !== 2) {
             return res.status(403).json({ error: "Forbidden: You don't have permission to view this user" });
         }
+        if (!validateObjectId(goalId, res)) return;
 
-        // Validate if the provided ID is a valid ObjectId
-        if (!mongoose.isValidObjectId(goalId)) {
-            return res.status(400).json({ error: "Invalid _id" });
-        }
 
         const existingGoal = await Goal.findById(goalId);
 
@@ -824,7 +810,6 @@ exports.endGoalById = async (req, res) => {
     }
 };
 
-
 // Route to get goal stats By Super Admin and Admin
 exports.getStats = async (req, res) => {
     try {
@@ -835,6 +820,7 @@ exports.getStats = async (req, res) => {
         if (adminRole !== 1 && adminRole !== 2) {
             return res.status(403).json({ error: "Forbidden: You don't have permission to view this user" });
         }
+        if (!validateObjectId(goalId, res)) return;
 
         // Fetch the goal document with populated goalUsers
         const goal = await Goal.findById(goalId).populate('goalUsers');
@@ -850,6 +836,14 @@ exports.getStats = async (req, res) => {
 };
 
 
+// Function to validate if an ID is a valid ObjectId
+const validateObjectId = (id, res) => {
+    if (!mongoose.isValidObjectId(id)) {
+        res.status(400).json({ error: "Invalid _id" });
+        return false;
+    }
+    return true;
+};
 
 // Helper function to find active goals
 async function findActiveGoals() {
@@ -860,7 +854,6 @@ async function findActiveGoals() {
 async function findUpcomingGoals() {
     return await Goal.findOne({ startDate: { $gt: new Date() }, status: true, }).populate('goalUsers');
 }
-
 
 // Helper function to find last updated information for a user
 async function findLastUpdatedInfo(userId) {
