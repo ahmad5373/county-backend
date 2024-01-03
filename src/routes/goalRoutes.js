@@ -16,8 +16,9 @@ Router.get("/", auth, goalController.getAllGoals);
 // Get all ended goal routes
 Router.get("/ended-goals", auth, goalController.getAllEndedGoals);
 
-// Get all ended goal routes
-Router.get("/ended-goals/:_id", auth, goalController.getUserEndedGoals);
+
+// Get ended goal with goalId routes
+Router.get("/ended-goals/:_id", auth, goalController.getEndedGoalsById);
 
 // Get Active Goals Routes
 Router.get("/active-goals", auth, goalController.getActiveGoals);
