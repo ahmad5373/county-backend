@@ -7,9 +7,6 @@ dotenv.config();
 const USER_EMAIL = process.env.USER_EMAIL;
 const USER_PASSWORD = process.env.USER_PASSWORD;
 
-console.log("user email ", USER_EMAIL);
-console.log("user password",USER_PASSWORD);
-
 const transporter = nodemailer.createTransport({
     service: 'gmail',
     auth:{
@@ -27,7 +24,6 @@ const sendMail = async(to, subject , html)=>{
     };
     try {
         const info = await transporter.sendMail(mailOption);
-        console.log("email Sent Info : ", info);
         console.log("email Sent: ", info.messageId);
     } catch (error) {
         console.log("Error Sending email ",error);
