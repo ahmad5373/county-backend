@@ -17,8 +17,8 @@ exports.createGoal = async (req, res) => {
         }
 
         // Find active and upcoming goals
-        const activeGoal = await Goal.findOne({ startDate: { $lte: new Date() }, endDate: { $gte: new Date() }, status: true, });
-        const upComingGoal = await Goal.findOne({ startDate: { $gt: new Date() }, status: true });
+        const activeGoal = await findActiveGoals();
+        const upComingGoal = await findUpcomingGoals();
 
         if (!activeGoal && !upComingGoal) {
             if (repeat === false) {
@@ -346,54 +346,46 @@ exports.getAllEndedGoals = async (req, res) => {
     }
 };
 
-
-
-// Get Active  Goals
+// Get Active Goals
 exports.getActiveGoals = async (req, res) => {
     try {
         const adminRole = req.user.user.role;
-        // Only Super Admins, Admins, and the user themselves can view goal details
+        // Check user permissions
         if (adminRole !== 1 && adminRole !== 2) {
             return res.status(403).json({ error: "Forbidden: You don't have permission to view goals" });
         }
-        // Find active goals where the current date is within the start and end date range
-        const activeGoals = await Goal.findOne({
-            startDate: { $lte: new Date() },
-            endDate: { $gte: new Date() },
-            status: true, // Assuming status is also true for active goals
-        }).populate('goalUsers');
-
-        if (!activeGoals) { return res.status(404).json({ error: "No Active Goals Found." }) }
-        // Assuming you have the goalId and userId variables available
-        const goalId = activeGoals ? activeGoals._id : null;  // Replace with the actual goalId
-        const userIds = activeGoals ? activeGoals.goalUsers.map(goalUser => goalUser.userId) : [];
-
-        // Find the last updated information for each user
-        const lastUpdatedInfo = await GoalUserTargets.aggregate([
-            {
-                $match: {
-                    goalId,
-                    userId: { $in: userIds }
-                }
-            },
-            {
-                $sort: { recruited_at: -1 }
-            },
-            {
-                $group: {
-                    _id: "$userId",
-                    latestUpdate: { $first: "$$ROOT" }
-                }
-            }
-        ]);
-
-        // Fetch the goal document with populated goalUsers
-        const goal = await Goal.findById(goalId).populate('goalUsers');
-        if (!goal) {
-            return res.status(404).json({ error: 'Goal not found' });
+        // Find active goals
+        const activeGoals = await findActiveGoals();
+        if (!activeGoals) {
+            return res.status(404).json({ error: "No Active Goals Found." });
         }
 
-        const goalStates = await calculateGoalStates(goal.goalUsers); // call function to calculate goals states
+        // Calculate goal states
+        const goalStates = await calculateGoalStates(activeGoals.goalUsers);
+
+        // Fetch additional user information
+        const users = await Promise.all(activeGoals.goalUsers.map(async goalUser => {
+            const user = await User.findById(goalUser.userId);
+            const lastUpdatedInfo = await findLastUpdatedInfo(goalUser.userId);
+            const lastUpdated = lastUpdatedInfo.length > 0 ? lastUpdatedInfo[0].latestUpdate.updatedAt : null;
+
+            // Calculate user states
+            const userStates = await calculateUserStates(goalUser);
+
+            return {
+                _id: goalUser._id,
+                userId: goalUser.userId,
+                firstName: user.firstName,
+                lastName: user.lastName,
+                goalNumber: goalUser.goalNumber,
+                createdAt: goalUser.createdAt,
+                updatedAt: goalUser.updatedAt,
+                lastUpdated,
+                userStates: userStates
+            };
+        }));
+
+        // Prepare response data
         const activeGoalsData = {
             _id: activeGoals._id,
             startDate: activeGoals.startDate,
@@ -404,28 +396,9 @@ exports.getActiveGoals = async (req, res) => {
             createdAt: activeGoals.createdAt,
             updatedAt: activeGoals.updatedAt,
             goalStates: goalStates,
-            users: await Promise.all(activeGoals.goalUsers.map(async goalUser => {
-                const user = await User.findById(goalUser.userId);
-                const userLastUpdatedInfo = lastUpdatedInfo.find(
-                    (info) => info._id.toString() === goalUser.userId.toString()
-                );
-                const lastUpdated = userLastUpdatedInfo ? userLastUpdatedInfo.latestUpdate.updatedAt : null;
-                // Reuse existing variables for calculating completion and bonus percentages
-                const userStates = await calculateUserStates(goalUser)
+            users: users,
+        };
 
-                return {
-                    _id: goalUser._id,
-                    userId: goalUser.userId,
-                    firstName: user.firstName,
-                    lastName: user.lastName,
-                    goalNumber: goalUser.goalNumber,
-                    userStates: userStates,
-                    createdAt: goalUser.createdAt,
-                    updatedAt: goalUser.updatedAt,
-                    lastUpdated
-                };
-            })),
-        }
         res.status(200).json(activeGoalsData);
     } catch (error) {
         console.log("Error:", error);
@@ -442,12 +415,8 @@ exports.getUpcomingGoals = async (req, res) => {
             return res.status(403).json({ error: "Forbidden: You don't have permission to view goals" });
         }
 
-        // Find upcoming goals where the start date is after the current date
-        const upcomingGoals = await Goal.findOne({
-            startDate: { $gt: new Date() },
-            status: true,
-        }).populate('goalUsers');
-
+        // Find upcoming goals
+        const upcomingGoals = await findUpcomingGoals();
         if (!upcomingGoals) { return res.status(404).json({ error: "No Upcoming Goals Found." }) }
 
         // Map the upcoming goals to the desired response structure
@@ -504,30 +473,9 @@ exports.getRecruiterDetails = async (req, res) => {
             return res.status(404).json({ error: 'Goal not found.' });
         }
 
+        const goalUser = await GoalUser.findOne({ userId: userId, goalId: goalId })
+        const userStates = await calculateUserStates(goalUser)
         const recruits = await GoalUserTargets.find({ goalId, userId });
-        const goalUserEntry = goal.goalUsers.find(u => u.userId.toString() === userId);
-
-        if (!goalUserEntry) {
-            return res.status(404).json({ error: 'User not found in the goal.' });
-        }
-
-        const { bonus: totalBonus } = goal;
-        const { goalNumber: total } = goalUserEntry;
-
-        const completed = await GoalUserTargets.countDocuments({ goalId: goal._id, userId });
-        const remaining = total - completed;
-        let bn = 0;
-        let cp = 0;
-
-        if (remaining < 0) {
-            const extra = completed - total;
-            if (totalBonus > 0) {
-                bn = Math.min((extra * 100) / totalBonus, 100);
-            }
-            cp = 100;
-        } else if (total > 0) {
-            cp = (completed * 100) / total;
-        }
 
         const responseData = {
             _id: goal._id,
@@ -538,12 +486,8 @@ exports.getRecruiterDetails = async (req, res) => {
             repeat: goal.repeat,
             status: goal.status,
             userName: `${user.firstName} ${user.lastName}`,
-            goalNumber: goalUserEntry.goalNumber,
-            userStates: {
-                completed_percentage: parseFloat(cp.toFixed(2)),
-                incompleted_percentage: parseFloat((100 - cp).toFixed(2)),
-                bonus_percentage: parseFloat(bn.toFixed(2)),
-            },
+            goalNumber: goalUser.goalNumber,
+            userStates: userStates,
             recruits: recruits.map(recruit => ({
                 _id: recruit._id,
                 recruiterName: recruit.recruit_name,
@@ -594,28 +538,6 @@ exports.getActiveGoalsById = async (req, res) => {
                 return null;
             }
 
-            const goalId = activeGoal ? activeGoal._id : null;
-            const userIds = activeGoal ? activeGoal.goalUsers.map(goalUser => goalUser.userId) : [];
-
-            // Find the last updated information for each user
-            const lastUpdatedInfo = await GoalUserTargets.aggregate([
-                {
-                    $match: {
-                        goalId,
-                        userId: { $in: userIds }
-                    }
-                },
-                {
-                    $sort: { recruited_at: -1 }
-                },
-                {
-                    $group: {
-                        _id: "$userId",
-                        latestUpdate: { $first: "$$ROOT" }
-                    }
-                }
-            ]);
-
             return {
                 _id: activeGoal._id,
                 startDate: activeGoal.startDate,
@@ -627,26 +549,11 @@ exports.getActiveGoalsById = async (req, res) => {
                 updatedAt: activeGoal.updatedAt,
                 users: await Promise.all(activeGoal.goalUsers.map(async goalUser => {
                     const user = await User.findById(goalUser.userId);
-                    const userLastUpdatedInfo = lastUpdatedInfo.find(
-                        (info) => info._id.toString() === goalUser.userId.toString()
-                    );
-                    const lastUpdated = userLastUpdatedInfo ? userLastUpdatedInfo.latestUpdate.updatedAt : null;
+                    const lastUpdatedInfo = await findLastUpdatedInfo(goalUser.userId);
+                    const lastUpdated = lastUpdatedInfo.length > 0 ? lastUpdatedInfo[0].latestUpdate.updatedAt : null;
 
-                    const total = goalUser.goalNumber;
-                    const completed = await GoalUserTargets.countDocuments({ goalId: activeGoal._id, userId: goalUser.userId });
-                    const remaining = total - completed;
-                    let bn = 0;
-                    let cp = 0;
-
-                    if (remaining < 0) {
-                        const extra = completed - total;
-                        if (activeGoal.bonus > 0) {
-                            bn = Math.min((extra * 100) / activeGoal.bonus, 100);
-                        }
-                        cp = 100;
-                    } else if (total > 0) {
-                        cp = (completed * 100) / total;
-                    }
+                    // Calculate user states
+                    const userStates = await calculateUserStates(goalUser);
 
                     return {
                         _id: goalUser._id,
@@ -654,12 +561,10 @@ exports.getActiveGoalsById = async (req, res) => {
                         firstName: user.firstName,
                         lastName: user.lastName,
                         goalNumber: goalUser.goalNumber,
-                        complete_percentage: parseFloat(cp.toFixed(2)),
-                        bonus: parseFloat(bn.toFixed(2)),
-                        incomplete_percentage: parseFloat((100 - cp).toFixed(2)),
                         createdAt: goalUser.createdAt,
                         updatedAt: goalUser.updatedAt,
-                        lastUpdated
+                        lastUpdated,
+                        userStates: userStates
                     };
                 })),
             };
@@ -698,38 +603,16 @@ exports.getEndedGoalsById = async (req, res) => {
                 { _id: goalId, endDate: { $lt: new Date() } }
             ]
         }).populate('goalUsers');
-        
+
         if (!endedGoal) {
             return res.status(404).json({ error: 'No Ended goal found' })
         }
 
-        const userIds = endedGoal ? endedGoal.goalUsers.map(goalUser => goalUser.userId) : [];
-
-
-        // Find the last updated information for each user
-        const lastUpdatedInfo = await GoalUserTargets.aggregate([
-            {
-                $match: {
-                    goalId,
-                    userId: { $in: userIds }
-                }
-            },
-            {
-                $sort: { recruited_at: -1 }
-            },
-            {
-                $group: {
-                    _id: "$userId",
-                    latestUpdate: { $first: "$$ROOT" }
-                }
-            }
-        ]);
-
-          // Fetch the goal document with populated goalUsers
-          const goal = await Goal.findById(goalId).populate('goalUsers');
-          if (!goal) {
-              return res.status(404).json({ error: 'Goal not found' });
-          }
+        // Fetch the goal document with populated goalUsers
+        const goal = await Goal.findById(goalId).populate('goalUsers');
+        if (!goal) {
+            return res.status(404).json({ error: 'Goal not found' });
+        }
 
         const goalStates = await calculateGoalStates(goal.goalUsers); // call function to calculate goals states
         const response = {
@@ -744,11 +627,9 @@ exports.getEndedGoalsById = async (req, res) => {
             goalStates: goalStates,
             users: await Promise.all(endedGoal.goalUsers.map(async goalUser => {
                 const user = await User.findById(goalUser.userId);
-                const userLastUpdatedInfo = lastUpdatedInfo.find(
-                    (info) => info._id.toString() === goalUser.userId.toString()
-                );
-                const lastUpdated = userLastUpdatedInfo ? userLastUpdatedInfo.latestUpdate.updatedAt : null;
                 const userStates = await calculateUserStates(goalUser)
+                const lastUpdatedInfo = await findLastUpdatedInfo(goalUser.userId);
+                const lastUpdated = lastUpdatedInfo.length > 0 ? lastUpdatedInfo[0].latestUpdate.updatedAt : null;
 
                 return {
                     _id: goalUser._id,
@@ -756,10 +637,10 @@ exports.getEndedGoalsById = async (req, res) => {
                     firstName: user.firstName,
                     lastName: user.lastName,
                     goalNumber: goalUser.goalNumber,
-                    userStates: userStates,
                     createdAt: goalUser.createdAt,
                     updatedAt: goalUser.updatedAt,
-                    lastUpdated
+                    lastUpdated,
+                    userStates: userStates
                 };
             })),
         };
@@ -811,7 +692,7 @@ exports.getGoalById = async (req, res) => {
     }
 };
 
-
+// Update goal by goal ID
 exports.updateGoalById = async (req, res) => {
     try {
         const goalId = req.params._id;
@@ -908,7 +789,6 @@ exports.updateGoalById = async (req, res) => {
     }
 };
 
-
 // End a goal by ID
 exports.endGoalById = async (req, res) => {
     try {
@@ -970,16 +850,45 @@ exports.getStats = async (req, res) => {
 };
 
 
-// Helper function to calculate goal states for a all user 
+
+// Helper function to find active goals
+async function findActiveGoals() {
+    return await Goal.findOne({ startDate: { $lte: new Date() }, endDate: { $gte: new Date() }, status: true }).populate('goalUsers');
+}
+
+// Helper function to find Upcoming goal
+async function findUpcomingGoals() {
+    return await Goal.findOne({ startDate: { $gt: new Date() }, status: true, }).populate('goalUsers');
+}
+
+
+// Helper function to find last updated information for a user
+async function findLastUpdatedInfo(userId) {
+    return await GoalUserTargets.aggregate([
+        {
+            $match: {
+                userId: userId
+            }
+        },
+        {
+            $sort: { recruited_at: -1 }
+        },
+        {
+            $group: {
+                _id: "$userId",
+                latestUpdate: { $first: "$$ROOT" }
+            }
+        }
+    ]);
+}
+
+// Helper function to calculate goal states for all users
 async function calculateGoalStates(goalUsers) {
-    // Initialize an array to store user goal completion percentages
     const userGoalPercentage = [];
 
-    // Iterate through each GoalUser record
     for (const user of goalUsers) {
-        const bonus = user.bonus; // Assuming bonus is a property of user, not goal
+        const bonus = user.bonus;
         const total = user.goalNumber;
-
         const userAchievedTargets = await GoalUserTargets.countDocuments({
             goalId: user.goalId,
             userId: user.userId,
@@ -988,9 +897,7 @@ async function calculateGoalStates(goalUsers) {
         let bp = 0;
         let cp = userAchievedTargets >= total ? total : userAchievedTargets;
 
-        // Check if the user has achieved all targets
         if (userAchievedTargets >= total) {
-            // Calculate bonus percentage for the user
             bp = bonus > 0 ? Math.min((userAchievedTargets - total) * 100 / bonus, 100) : 0;
         }
 
@@ -1001,19 +908,13 @@ async function calculateGoalStates(goalUsers) {
         });
     }
 
-    // Calculate total completed and bonus percentages
     const cp = userGoalPercentage.reduce((sum, item) => sum + item.completed, 0);
     const bp = userGoalPercentage.reduce((sum, item) => sum + item.bonus, 0);
-
-    // Calculate average bonus percentage and overall completed percentage
     const avgBp = goalUsers.length > 0 ? bp / goalUsers.length : 0;
     const totalTarget = goalUsers.reduce((sum, user) => sum + user.goalNumber, 0);
     const completedPercentage = goalUsers.length > 0 ? Math.min((cp * 100) / totalTarget, 100) : 0;
-
-    // Calculate incomplete percentage based on completed percentage
     const incompletePercentage = 100 - completedPercentage;
 
-    // Format and return the result
     return {
         completed_percentage: parseFloat(completedPercentage.toFixed(2)),
         incompleted_percentage: parseFloat(incompletePercentage.toFixed(2)),
@@ -1021,28 +922,25 @@ async function calculateGoalStates(goalUsers) {
     };
 }
 
-// Helper function to calculate  each user states for a given array of goalUsers
-async function calculateUserStates(user) {
-
-    const bonus = user.bonus;
-    const total = user.goalNumber;
-
+// Helper function to calculate user states for a given user
+async function calculateUserStates(goalUser) {
+    const bonus = goalUser.bonus;
+    const total = goalUser.goalNumber;
     const userAchievedTargets = await GoalUserTargets.countDocuments({
-        goalId: user.goalId,
-        userId: user.userId,
+        goalId: goalUser.goalId,
+        userId: goalUser.userId,
     });
+
     let bn = 0;
     let cp = userAchievedTargets >= total ? 100 : (userAchievedTargets * 100) / total;
 
-    //check if the user has achieved all  targets
     if (userAchievedTargets >= total) {
-        //calculate bonus percentage for the user 
         bn = bonus > 0 ? Math.min((userAchievedTargets - total) * 100 / bonus, 100) : 0;
     }
-    return ({
+
+    return {
         complete_percentage: parseFloat(cp.toFixed(2)),
         bonus_percentage: parseFloat(bn.toFixed(2)),
         incomplete_percentage: parseFloat((100 - cp).toFixed(2))
-    })
-    // }
+    };
 }
